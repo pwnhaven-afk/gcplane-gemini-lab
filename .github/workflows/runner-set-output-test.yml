@@ -1,0 +1,29 @@
+name: runner-set-output-test
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: emit both forms (set-output first, then GITHUB_OUTPUT file)
+        id: s1
+        run: |
+          echo "::set-output name=gemini_json::PAYLOAD_SET_OUTPUT_FIRST"
+          echo "gemini_json<<EOF" >> "$GITHUB_OUTPUT"
+          echo "PAYLOAD_FILE_SECOND" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - name: emit both forms (GITHUB_OUTPUT file first, then set-output)
+        id: s2
+        run: |
+          echo "gemini_json<<EOF" >> "$GITHUB_OUTPUT"
+          echo "PAYLOAD_FILE_FIRST" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "::set-output name=gemini_json::PAYLOAD_SET_OUTPUT_SECOND"
+      - name: emit set-output only
+        id: s3
+        run: |
+          echo "::set-output name=gemini_json::PAYLOAD_SET_OUTPUT_ONLY"
+      - name: report
+        run: |
+          echo "S1=[${{ steps.s1.outputs.gemini_json }}]"
+          echo "S2=[${{ steps.s2.outputs.gemini_json }}]"
+          echo "S3=[${{ steps.s3.outputs.gemini_json }}]"
