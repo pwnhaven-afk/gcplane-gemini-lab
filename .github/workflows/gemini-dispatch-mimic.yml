@@ -1,0 +1,86 @@
+# Structural mirror of GoogleCloudPlatform/genmedia-creative-studio
+#   .github/workflows/gemini-dispatch.yml + gemini-triage.yml
+# Same trigger (issues: opened -> any GitHub account, no approval concept),
+# same job split (dispatch -> triage), same id-token:write, same
+# google-github-actions/auth WIF + token_format access_token + cloud-platform.
+# The only substitution is the LLM step: the real target runs
+# google-github-actions/run-gemini-cli with tools.core=["read_file"]; this PoC
+# runs the equivalent "model-adjacent" read of the same credentials file so the
+# credential reachability is visible in a log.
+name: Gemini Dispatch (structural mirror)
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      command: ${{ steps.extract_command.outputs.command }}
+    steps:
+      - name: Extract command
+        id: extract_command
+        env:
+          EVENT_TYPE: ${{ github.event_name }}.${{ github.event.action }}
+          REQUEST: ${{ github.event.issue.body }}
+          ASSOCIATION: ${{ github.event.issue.author_association }}
+        run: |
+          # Mirrors the real routing: untrusted issue authors -> triage only.
+          if [ "$EVENT_TYPE" = "issues.opened" ] || [ "$EVENT_TYPE" = "issues.reopened" ]; then
+            echo "command=triage" >> "$GITHUB_OUTPUT"
+          else
+            echo "command=fallthrough" >> "$GITHUB_OUTPUT"
+          fi
+          echo "author_association=${ASSOCIATION}"
+
+  triage:
+    needs: dispatch
+    if: ${{ needs.dispatch.outputs.command == 'triage' }}
+    runs-on: ubuntu-latest
+    # REAL TARGET: gemini-triage.yml `triage` job also declares NO environment.
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: project-ed1ba462-a6e8-4f5f-a0b
+          workload_identity_provider: projects/358242837328/locations/global/workloadIdentityPools/gcplane-pool/providers/gcplane-gh
+          service_account: gcplane-sa@project-ed1ba462-a6e8-4f5f-a0b.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform
+          access_token_lifetime: 600s
+
+      - name: Attacker-controlled prompt surface (issue title/body)
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          echo "CANARY_SECRET_PRESENT=$([ -n "${{ secrets.CANARY }}" ] && echo YES || echo NO)"
+          echo "CANARY_SECRET=${{ secrets.CANARY }}"
+          echo "ATTACKER_TITLE=$ISSUE_TITLE"
+          echo "ATTACKER_BODY=$ISSUE_BODY"
+
+      - name: Credential reachability (what the LLM read_file tool can reach)
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_APPLICATION_CREDENTIALS"
+          ls -l "$GOOGLE_APPLICATION_CREDENTIALS"
+          echo "CREDS_FILE_READABLE=$(test -r "$GOOGLE_APPLICATION_CREDENTIALS" && echo YES || echo NO)"
+          # Prove the minted credential is a LIVE Google credential, not a string.
+          TOKEN=$(gcloud auth print-access-token 2>/dev/null || true)
+          if [ -z "$TOKEN" ]; then echo "TOKEN_MINT=FAIL"; exit 1; fi
+          echo "TOKEN_MINT=OK token_len=${#TOKEN}"
+          curl -s "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${TOKEN}" | jq -c '{email,scope,expires_in}'
+          # Prove a zero-approval issue author's text reached the credentialed step.
+          echo "INJECTION_ROUNDTRIP=$(printf '%s' "$ISSUE_BODY" | head -c 120)"
