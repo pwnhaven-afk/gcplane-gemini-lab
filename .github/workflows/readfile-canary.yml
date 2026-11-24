@@ -10,6 +10,8 @@ permissions:
 jobs:
   control-ordinary-file:
     runs-on: ubuntu-latest
+    env:
+      GEMINI_CLI_TRUST_WORKSPACE: 'true'
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
@@ -43,6 +45,8 @@ jobs:
           echo "CONTROL_RESPONSE_END"
   blocked-gha-creds:
     runs-on: ubuntu-latest
+    env:
+      GEMINI_CLI_TRUST_WORKSPACE: 'true'
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
